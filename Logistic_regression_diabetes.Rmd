@@ -1,0 +1,759 @@
+---
+title: "La Data Science a servizio della sanità: un approccio statistico alla prevenzione e diagnosi del diabete"
+author: "Giorgio Dramis, Claudia Galdini, Sara Germano"
+date: "2024-03-13"
+output: html_document
+---
+
+# Introduzione
+
+Negli ultimi anni, la Data Science ha profondamente mutato la maniera di ragionare e operare nelle diverse industrie, trasformando radicalmente il modo in cui comprendiamo e affrontiamo le sfide contemporanee.
+
+Grazie alla crescente disponibilità di dati e la democratizzazione delle risorse per analizzarli, alcuni settori in particolare stanno vedendo una vera e propria rivoluzione. Uno tra tutti, è il settore **sanitario**.
+
+La Data Science è nota per avere una rilevanza significativa nella prevenzione medica, consentendo ai ricercatori e agli operatori sanitari di essere più efficaci, analizzando grandi quantità di **dati clinici**. Utilizzando algoritmi avanzati, l'analisi dei dati può aiutare a individuare fattori di **rischio**, anticipare l'insorgenza di **malattie** e personalizzare le strategie di **intervento**. Questa capacità predittiva consente una diagnosi precoce, senza operazioni invasive, e interventi preventivi mirati.
+
+I dati presentati nelle analisi a seguire sono stati raccolti e resi disponibili dal _“National Institute of Diabetes and Digestive and Kidney Diseases”_ degli Stati Uniti, come parte del database _‘Pima Indians Diabetes’_. Di fatto, tutte le osservazioni presenti al suo interno sono pazienti, donne, di età pari o superiore ai 21 anni, che appartengono al ceppo indiano _Pima_ (un’etnia di Nativi Americani).
+
+L’obiettivo dell’indagine su tale dataset è di individuare pattern, tendenze e correlazioni nascoste tra i dati, oltre a identificare un modello accurato in grado di **predire** se una paziente con determinati valori clinici e altre caratteristiche sia propensa o meno a sviluppare il diabete.
+
+Nello specifico, ci si aspetta che questo studio fornisca:
+
+* Una migliore comprensione dei fattori che **influenzano** l'insorgenza del diabete;
+* Un modello **predittivo** accurato per la diagnosi del diabete;
+* Informazioni utili per la prevenzione e il trattamento del diabete.
+
+___
+
+# Descrizione del dataset e delle metodologie adottate per lo studio
+
+Come menzionato nell’introduzione, il __[dataset](https://www.kaggle.com/datasets/kandij/diabetes-dataset/data)__ utilizzato per l’analisi è un insieme di 768 osservazioni, ciascuna facente riferimento ad una diversa paziente e relativi sintomi e altri dati clinici. Gli attributi di partenza sono 9, tutti interi meno due numerici:
+
+* "Age": età della paziente;
+* "Glucose": tasso di glicemia (quantità di glucosio presente nel sangue). Il glucosio è uno zucchero semplice che rappresenta la principale fonte di energia per il corpo umano. Tuttavia, un eccesso di glucosio nel sangue (iperglicemia) può portare al diabete;
+* "Insulin": livello di insulina, l' ormone prodotto dal pancreas che svolge un ruolo chiave nel controllo del diabete. Quando i livelli di insulina sono insufficienti o le cellule non rispondono correttamente all'insulina, il glucosio si accumula nel sangue, causando iperglicemia, che può portare al diabete;
+* "BloodPressure": pressione sanguigna;
+* "Pregnancies": numero di gravidanze affrontate dalla paziente;
+* "SkinThickness": spessore della pelle;
+* "BMI": sigla che sta per “Body Mass Index”, valore "indice di massa corporea" che mette in relazione peso e altezza per dare un'idea generale del peso forma della paziente;
+* "DiabetesPedigreeFunction": predisposizione genetica al diabete. Si tratta di un sistema di punteggio che cerca di stimare la probabilità che la paziente sviluppi il diabete in base alla sua storia familiare. Considera la presenza del diabete nei genitori dell'individuo e la loro età;
+* "Outcome": variabile binaria che indica la diagnosi (0 = paziente non diabetica, 1 = paziente diabetica).
+
+```{r inport, echo=TRUE, message=FALSE, warning=FALSE}
+source <- read.csv("diabetes2.csv")
+```
+
+Verrà utilizzato R per l'analisi nelle pagine a seguire, effettuata tramite regressione logistica. Per quanto riguarda i pacchetti più ricorrenti: ggplot, caret, plotly per le visualizzazioni, pROC in particolare per le curve ROC. Dplyr per la maggior parte delle operazioni di manipolazione dei dati.
+
+```{r packages, echo=TRUE, message=FALSE, warning=FALSE}
+#install.packages("dplyr")
+#install.packages("ggplot2")
+#install.packages("plotly")
+#install.packages("car")
+#install.packages("caret")
+#install.packages("pROC")
+#install.packages("epiDisplay")
+#install.packages("sjPlot")
+#install.packages("MASS")
+#install.packages("ROSE")
+
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(car)
+library(caret)
+library(pROC)
+library(epiDisplay)
+library(MASS)
+library(sjPlot)
+library(ROSE)
+```
+___
+
+# Pre-processamento dei dati e pulizia del dataset
+
+Prima di procedere con l'analisi, è necessario fare delle operazioni per correggere imperfezioni nei dati e renderli omogenei, e per eliminare eventuali **multicollinearità** tra le variabili o **outliers** che possano confondere i modelli.
+
+```{r preprocessing, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Individuazione eventuali valori NA
+
+valori_null <- is.na(source)
+source_null <- source[rowSums(valori_null)>0, ] # non vengono rilevati NA
+data <- source
+
+# Individuazione eventuali duplicati
+
+duplicati <- data[duplicated(data) | duplicated(data, fromLast = TRUE), ] # non vengono rilevati duplicati
+
+data_backup <- data # creazione di un dataset di backup
+
+# pulizia dell'environment
+rm(duplicati)
+rm(source_null)
+rm(valori_null)
+
+head(data, 10)
+```
+
+### Numero di gravidanze
+```{r pregnancies, echo=FALSE, message=FALSE, warning=FALSE}
+box_pregnancies <- plot_ly(data, y = ~Pregnancies,
+                  type = "box", line = list(color="black"),
+                  marker = list(color = "black"), fillcolor = '#0088ff') %>%
+  layout(title = "",
+         yaxis = list(title = "Numero di gravidanze affrontate"),
+         paper_bgcolor = 'white',
+         plot_bgcolor = 'white',
+         margin = list(l = 110, r = 70, b = 100, t = 100))
+
+box_pregnancies 
+
+#eliminazione di soggetti che hanno affrontato più di 14 gravidanze
+
+data <- data %>% filter (Pregnancies < 14)
+```
+Vengono eliminate dal dataset le pazienti che hanno affrontato più di 14 gravidanze, considerabili come casistiche particolarmente rare. L'istogramma a seguito della modifica:
+```{r pregnancies1, echo=FALSE, message=FALSE, warning=FALSE}
+bp_pregnancies <- plot_ly(data = as.data.frame(table(data$Pregnancies)),
+                            x = ~Var1, y = ~Freq,
+                            type = "bar",
+                            marker = list(color = ~Freq, colorscale = list(c(0, 1), c("#0088ff", "#120a8f")))) %>%
+  layout(
+    title = list(text = ""),
+    xaxis = list(title = list(text = "")), standoff = 20,
+    yaxis = list(title = list(text = "Pazienti"), standoff = 20),
+    paper_bgcolor = 'white',
+    plot_bgcolor = 'white',
+    margin = list(l = 110, r = 70, b = 100, t = 100))
+
+bp_pregnancies
+```
+
+### Tasso di glicemia
+```{r glucose1, echo=FALSE, message=FALSE, warning=FALSE}
+box_glucose <- plot_ly(data, y = ~Glucose,
+                           type = "box", line = list(color="black"),
+                           marker = list(color = "black"), fillcolor = '#0088ff') %>%
+  layout(title = "",
+         yaxis = list(title = "Valore tasso di glicemia"),
+         paper_bgcolor = 'white',
+         plot_bgcolor = 'white',
+         margin = list(l = 110, r = 70, b = 100, t = 100)
+  )
+
+box_glucose 
+
+data <- data %>% filter (Glucose > 0) # eliminazione glucose ==0
+```
+Viene eliminata l'unica osservazione con tasso di glicemia pari a zero, poichè caso non verificabile secondo la letteratura scientifica.
+
+### Pressione sanguigna
+```{r bp, echo=FALSE, message=FALSE, warning=FALSE}
+box_BloodPressure <- plot_ly(data, y = ~BloodPressure,
+                       type = "box", line = list(color="black"),
+                       marker = list(color = "black"), fillcolor = '#0088ff') %>%
+  layout(title = "",
+         yaxis = list(title = "Valore pressione sanguigna"),
+         paper_bgcolor = 'white',
+         plot_bgcolor = 'white',
+         margin = list(l = 110, r = 70, b = 100, t = 100)
+  )
+
+box_BloodPressure 
+
+data <- data %>% filter (BloodPressure > 0)  # eliminazione BP ==0
+```
+Vengono eliminate le osservazioni con pressione sanguigna pari a zero, poichè casi non verificabili secondo la letteratura scientifica.
+
+### Spessore della pelle
+```{r skin, echo=FALSE, message=FALSE, warning=FALSE}
+box_SkinThickness <- plot_ly(data, y = ~SkinThickness,
+                             type = "box", line = list(color="black"),
+                             marker = list(color = "black"),fillcolor = '#0088ff') %>%
+  layout(title = "",
+         yaxis = list(title = "Spessore della pelle"),
+         paper_bgcolor = 'white',
+         plot_bgcolor = 'white',
+         margin = list(l = 110, r = 70, b = 100, t = 100)
+  )
+
+box_SkinThickness 
+
+data <- data %>% filter (SkinThickness < 99) # eliminazione ST >= 99
+```
+Vengono eliminate le osservazioni con spessore della pelle superiore a 99 mils (millesimi di pollice - nel sistema decimale corrispondono a 2514 micron).
+
+### Livello di insulina
+```{r insuline, echo=FALSE, message=FALSE, warning=FALSE}
+box_Insulin <- plot_ly(data, y = ~Insulin,
+                             type = "box", line = list(color="black"),
+                             marker = list(color = "black",fillcolor = '#0088ff')) %>%
+  layout(title = "",
+         yaxis = list(title = "Livello di insulina"),
+         paper_bgcolor = 'white',
+         plot_bgcolor = 'white',
+         margin = list(l = 110, r = 70, b = 100, t = 100)
+  )
+
+box_Insulin
+
+data <- data %>% filter (Insulin < 650)
+```
+Si mantengono solo le osservazioni con livello di insulina inferiore a 650 µIU/L.
+
+### Body Mass Index (BMI)
+```{r bmi, echo=FALSE, message=FALSE, warning=FALSE}
+box_BMI <- plot_ly(data, y = ~BMI,
+                       type = "box", line = list(color="black"),
+                       marker = list(color = "black", fillcolor = '#0088ff')) %>%
+  layout(title = "",
+         yaxis = list(title = "Indice di massa corporea"),
+         paper_bgcolor = 'white',
+         plot_bgcolor = 'white',
+         margin = list(l = 110, r = 70, b = 100, t = 100)
+  )
+
+box_BMI 
+
+data <- data %>% filter (BMI < 60) # eliminazione superiori a 60
+data <- data %>% filter (BMI > 0) # eliminazione 0
+```
+Si mantengono solo le osservazioni con indice di massa corporea compresa tra 0 e 60 (estremi esclusi).
+
+### Funzione di rischio genetico per il diabete
+```{r pedigree, echo=FALSE, message=FALSE, warning=FALSE}
+box_DiabetesPedigreeFunction <- plot_ly(data, y = ~DiabetesPedigreeFunction,
+                   type = "box", line = list(color="black"),
+                   marker = list(color = "black", fillcolor = '#0088ff')) %>%
+  layout(title = "",
+         yaxis = list(title = "Valore"),
+         paper_bgcolor = 'white',
+         plot_bgcolor = 'white',
+         margin = list(l = 110, r = 70, b = 100, t = 100)
+  )
+
+box_DiabetesPedigreeFunction
+
+data <- data %>% filter (DiabetesPedigreeFunction < 1.5)
+```
+Vengono eliminate le osservazioni con punteggio di rischio genetico per il diabete superiore all'1.5.
+
+### Età
+```{r age, echo=FALSE, message=FALSE, warning=FALSE}
+box_Age <- plot_ly(data, y = ~Age,
+           type = "box", line = list(color="black"),
+           marker = list(color = "black", fillcolor = '#0088ff')) %>%
+  layout(title = "",
+         yaxis = list(title = "Età"),
+         paper_bgcolor = 'white',
+         plot_bgcolor = 'white',
+         margin = list(l = 110, r = 70, b = 100, t = 100)
+  )
+
+box_Age
+
+data <- data %>% filter (Age < 80)
+```
+Viene eliminata l'unica osservazione outlier corrispondente a una paziente di 80 anni di età.
+
+### Outcome
+Viene infine analizzata la variabile risposta 'Outcome', ossia il binario che indica se la paziente è o meno affetta da diabete.
+```{r outcome, echo=FALSE, message=FALSE, warning=FALSE}
+bar_Outcome <- plot_ly(data = as.data.frame(table(data$Outcome)),
+                            x = ~Var1, y = ~Freq,
+                            type = "bar",
+                            marker = list(color = ~Freq, colorscale = list(c(0, 1), c("#0088ff", "#120a8f")))) %>%
+  layout(
+    title = list(text = ""),
+    xaxis = list(title = list(text = "")), standoff = 20,
+    yaxis = list(title = list(text = "", standoff = 20),
+      paper_bgcolor = 'white',
+      plot_bgcolor = 'white',
+      margin = list(l = 110, r = 70, b = 100, t = 100)))
+
+bar_Outcome
+data$Outcome <- as.factor(data$Outcome)
+```
+Le pazienti diabetiche sono circa il 32% dell'intero dataset. La proporzione tra le due classi è **leggermente sbilanciata** - ad ogni modo si procede con l'applicazione di modelli di regressione logistica per esaminare accuratezza ed adattamento.
+
+___
+
+# Relazioni tra le variabili: matrice di correlazione
+
+Nella ricerca di pattern e tendenze tra i dati, la matrice di correlazione costituisce uno strumento prezioso. Fornisce infatti insight sulle relazioni tra le variabili, rivelando **connessioni nascoste**. Questa panoramica delle correlazioni non solo aiuta a identificare quali variabili sono correlate e in che misura, ma anche a individuare potenziali problemi di multicollinearità.
+
+In breve, l'analisi delle matrici di correlazione è un passaggio fondamentale nell'analisi dei dati, che guida il processo decisionale in modo più efficace e accurato, contribuendo così a una comprensione più approfondita del fenomeno che viene osservato.
+
+Di seguito sono riassunte le correlazioni più significative all'interno del dataset:
+
+```{r correlation_matrix, echo=FALSE, message=FALSE, warning=FALSE}
+encode_labels <- function(column) {
+  unique_labels <- unique(column)
+  labels_to_numbers <- as.numeric(factor(column, levels = unique_labels))
+  return(labels_to_numbers)
+}
+
+data_temp <- data %>% mutate_if(is.logical, encode_labels)
+data_temp <- data_temp %>% mutate_if(is.factor, encode_labels)
+cormatrix <- cor(data_temp)
+View(cormatrix)
+
+heatmap(cormatrix, 
+        symm = TRUE,  # simmetria
+        col = colorRampPalette(c("blue", "white", "red"))(100),  # scala dei colori
+        main = "Heatmap della Matrice di Correlazione")
+
+#coroutcome <- cor(data_temp$Outcome, data_temp)
+#print(coroutcome[,1:8]) # per visualizzare esclusivamente le correlazioni di Outcome con le altre variabili
+data <- data[,-c(4,5)]
+remove(encode_labels)
+remove(data_temp)
+```
+
+Dai risultati della matrice di correlazione, resi più grafici dalla Heatmap, si nota in particolare una correlazione più alta della media, tra la variabile di outcome e il **tasso di glicemia**. A livello clinico, questo trova ovvia spiegazione nella sintomatologia del diabete: un eccesso di glucosio nel sangue può far sì che si manifesti la malattia.
+
+Debolmente correlate all'insorgenza del diabete sono anche il **numero di gravidanze** che ha affrontato la paziente, il suo **indice di massa corporea** e la sua **età**. Tutti e tre trovano spiegazione in letteratura:
+
+* Le donne che hanno avuto più gravidanze, soprattutto se complicate da diabete **gestazionale**, hanno un rischio maggiore di sviluppare il diabete;
+* Per quanto riguarda il  BMI, **l'obesità** è un fattore di rischio ben noto per lo svilupparsi del diabete;
+* L'età, come per molte altre patologie, ha anch'essa un ruolo evidente. Con **l'invecchiamento** del pancreas, responsabile di produrre l'insulina, se ne potrebbe avere una carenza. Inoltre il corpo stesso può diventare meno sensibile all'insulina col passare degli anni. Altro fattore da considerare è lo stile di vita generalmente più sedentario degli anziani che, contrapposto ad attività fisica regolare, può peggiorare la sensibilità all'insulina.
+
+Oltre alle correlazioni medio/alte, ci sono variabili che ci si sarebbe aspettato avessero più peso nella diagnosi del diabete, come la pressione sanguigna: diabete e ipertensione sono spesso associate (**l'ipertensione** danneggia i vasi sanguigni e i reni, organi importanti per il controllo della glicemia). È inoltre noto che le persone con il diabete tendono ad avere la pelle più sottile rispetto agli individui sani.
+
+Per tentare di condurre un'analisi quanto più accurata, le variabili di spessore della pelle e livello di insulina vengono eliminate dal dataset.
+
+Ad ogni modo, a questo punto dello studio nello specifico, è importante notare che la correlazione **non implica** necessariamente una relazione di causa-effetto. Variabili altamente correlate potrebbero **non** stabilire una relazione di causalità con la diagnosi del diabete, così come per questo campione specifico di pazienti le basse correlazioni potrebbero costituire un caso.
+
+___
+
+# Regressione logistica
+La regressione logistica è un modello statistico utilizzato per prevedere la probabilità di un evento binario, ossia un evento che può avere solo due esiti, come la presenza o l'assenza di una malattia. In medicina, questa tecnica trova diverse applicazioni, come la diagnosi, la prognosi, valutazione del rischio.
+
+Considerando le dimensioni del dataset sul quale si è svolta l'analisi, si è trattato dello strumento più appropriato, grazie alla robustezza dei modelli, che possono essere implementati ed interpretati con semplicità su dati di piccole dimensioni.
+```{r attach, echo=FALSE, message=FALSE, warning=FALSE}
+options(contrasts = c("contr.treatment", "contr.poly"))
+attach(data)
+```
+
+## Modello completo
+Per iniziare, si implementa un modello che include **tutte** le variabili indipendenti, considerando l'effetto di tutti gli attributi disponibili sulla probabilità della paziente di essere affetta o no da diabete.
+
+```{r modello_full, echo=TRUE, message=FALSE, warning=FALSE}
+mod_full <-glm(Outcome ~ ., binomial(link=logit), data)
+summary(mod_full)
+```
+Il modello suggerisce di **escludere** dall'analisi la **pressione sanguigna** e **l'età delle pazienti**. Questa modifica verrà effettuata più avanti.
+
+Si analizzano anche gli _Odds Ratio_ e rispettivi intervalli di confidenza - questi valori aiutano a interpretare l'effetto di ciascuna variabile indipendente sulla probabilità dell'evento analizzato dal modello:
+```{r modello_full1, echo=FALSE, message=FALSE, warning=FALSE}
+exp(cbind(coef(mod_full), confint.default(mod_full, level=0.99)))
+```
+Trattandosi di ambito medico, è stato scelto un intervallo di confidenza pari al 99%.
+
+Dai risultati emerge come tutte le variabili esplicative significative presentino _OR > 1_, cosa che indica che la propensione a sviluppare la malattia aumenta al crescere dei valori delle variabili.
+
+* Prendendo come riferimento la variabile "Pregnancies", dalle analisi era già in precedenza emerso come la correlazione tra le due fosse positiva. In particolare, osservando il valore di OR, si deduce ora che la propensione a sviluppare il diabete, per le donne che hanno affrontato _n_ gravidanze, sia superiore dell'*11,1%* rispetto alle donne che ne hanno affrontato _n-1_.
+
+* Analoga deduzione può essere fatta con le altre variabili del modello risultate significative. 
+Nel caso del glucosio, analizzando un incremento non unitario: la propensione di una paziente allo sviluppo del diabete è **2.1 volte** maggiore rispetto ad una paziente con un tasso di glicemia inferiore di **20 mg/dL**.
+
+* Un aumento del rischio di sviluppare il diabete si può avere anche all'aumentare dell'indice di massa corporea (1.1, 99% CI 1.05-1.14) e del valore di rischio genetico (3.86, 99% CI 1.62-9.19).
+
+A seguire, la rappresentazione grafica degli intervalli di confidenza:
+```{r modello_full2, echo=FALSE, message=FALSE, warning=FALSE}
+plot_model(mod_full, sort.est = TRUE)
+```
+
+Potrebbe essere utile visualizzare la distribuzione di probabilità di avere il diabete in relazione alle singole variabili del modello, per identificare visivamente l'eventuale presenza di pattern:
+```{r modello_full3, echo=FALSE, message=FALSE, warning=FALSE}
+plot(Pregnancies, mod_full$fitted, ylab = "Probabilità di avere il diabete", xlab = "Numero di gravidanze")
+plot(Glucose, mod_full$fitted, ylab = "Probabilità di avere il diabete", xlab = "Tasso di glicemia")
+plot(BloodPressure, mod_full$fitted, ylab = "Probabilità di avere il diabete", xlab = "Pressione del sangue")
+plot(BMI, mod_full$fitted, ylab = "Probabilità di avere il diabete", xlab = "BMI")
+plot(DiabetesPedigreeFunction, mod_full$fitted, ylab = "Probabilità di avere il diabete", xlab = "Diabetes Pedigree Function")
+plot(Age, mod_full$fitted, ylab = "Probabilità di avere il diabete", xlab = "Età")
+```
+
+Tra tutti gli _scatterplot_, gli unici in cui sembra si possa individuare una tendenza (all'aumentare del valore della variabile, un corrispondente aumento della probabilità di contrarre il diabete) sono il **tasso di glicemia** e l'**indice di massa corporea**. Ad ogni modo, le variabili che hanno mostrato una correlazione più bassa con la variabile risposta si sono rivelate scarsamente correlate tra di loro (quelle altamente correlate sono state precedentemente eliminate durante l'analisi di correlazione). Per questo motivo, anche se debolmente correlate, servono ad **aggiungere informazioni utili** all'analisi in fase di regressione logistica.
+
+Per valutare la bontà del modello, si utilizza il calcolo della probabilità della coda superiore della distribuzione del chi-quadrato, data la devianza del modello e il numero di gradi di libertà residui. Un valore di probabilità basso indicherebbe che la devianza osservata è significativamente più grande di quanto ci si aspetterebbe casualmente sotto l'ipotesi nulla (H0: è un buon modello rispetto a quello saturo), per cui si può utilizzare questo valore per stimare la correttezza del modello, assumere o no che sia un buon fit. In questo caso specifico, è prossimo a uno:
+```{r modello_full4, echo=TRUE, message=FALSE, warning=FALSE}
+pchisq(mod_full$deviance, mod_full$df.residual, lower.tail = F)
+```
+
+A seguire, la matrice di confusione generata dal modello, ove si può leggere anche l'accuratezza dello stesso:
+```{r modello_full5, echo=FALSE, message=FALSE, warning=FALSE}
+# confusion matrix
+previsioni <- predict(mod_full, type = "response")
+classi_predette <- ifelse(previsioni > 0.5, 1, 0)
+matrice_confusione <- confusionMatrix(as.factor(classi_predette), data$Outcome)
+print(matrice_confusione)
+```
+
+Un'accuratezza dello **0,7819** significa che il modello commette errori nel classificare il **21,81%** dei casi. Questo è un valore significativo, soprattutto se si considera che il diabete è una malattia grave. In ogni caso, nonostante non sia eccellente, non si tratta di un cattivo risultato.
+Il valore di specificità, invece, è basso perchè il modello commette tanti falsi positivi (101). In questa prima fase di analisi viene accettato un valore alto di falsi positivi poichè, essendo il modello applicato in ambito medico a supporto di una diagnosi, è ritenuta una scelta migliore quella di fare prevenzione lasciando poi al medico la decisione sulla base del caso specifico.
+
+Esistono inoltre diversi modi per ottenere risultati migliori del modello, come aumentare il numero di dati, selezionare le variabili migliori e utilizzare un algoritmo di apprendimento automatico più complesso. Tutte queste aternative saranno analizzate nelle pagine a seguire.
+
+Infine, la curva ROC associata a questo modello:
+```{r modello_full6, echo=FALSE, message=FALSE, warning=FALSE}
+# curva ROC
+roc(Outcome,previsioni)
+rocplot<-roc(Outcome~previsioni, col = "#0088ff", plot=TRUE, print.auc=T, legacy.axes = T,
+             main = "ROC curve")
+```
+
+**0,843** è un valore che dimostra un buon fit del modello.
+
+## Modello con esclusione della pressione sanguigna
+Il modello appena implementato, suggeriva nel summary di eliminare alcune variabili nel tentativo di migliorarne l'accuratezza. Si prosegue con l'eliminazione della pressione sanguigna.
+```{r modello_noBP, echo=FALSE, message=FALSE, warning=FALSE}
+# MODELLO senza la pressione sanguigna
+mod_nobp <-glm(Outcome ~. -BloodPressure, binomial(link=logit), data)
+summary(mod_nobp)
+```
+L'effetto della rimozione della pressione sanguigna non è stato poi così impattante sulle variabili restanti. Come mostrato a seguire, anche in questo caso come nel precedente, si ottiene un valore di **p-value alto**, che indica che la devianza osservata è compatibile con l'ipotesi di un modello corretto:
+```{r modello_noBP2, echo=FALSE, message=FALSE, warning=FALSE}
+pchisq(mod_nobp$deviance, mod_nobp$df.residual, lower.tail = F)
+```
+Si conclude con la matrice di confusione e curva ROC:
+```{r modello_noBP3, echo=FALSE, message=FALSE, warning=FALSE}
+# confusion matrix
+previsioni <- predict(mod_nobp, type = "response")
+classi_predette <- ifelse(previsioni > 0.5, 1, 0)
+matrice_confusione <- confusionMatrix(as.factor(classi_predette), data$Outcome)
+print(matrice_confusione)
+
+# curva ROC
+roc(Outcome,previsioni)
+rocplot<-roc(Outcome~previsioni, col = "#0088ff", plot=TRUE, print.auc=T, legacy.axes = T,
+             main = "ROC curve")
+```
+
+Il valore di accuratezza di questo modello è infinitesimamente **inferiore** al precedente che prendeva in considerazione tutte le variabili. Leggermente peggiorata anche la specificità.
+
+Si prosegue con l'analisi di altri modelli con combinazioni o modifiche alle variabili.
+
+## Modello con pressione sanguigna in categorie
+
+```{r modello_BP_cat, echo=FALSE, message=FALSE, warning=FALSE}
+hist(data$BloodPressure, main = "", xlab = "Pressione sanguigna", ylab = "Pazienti", col = "#0088ff", fill ="black", border = "black")
+```
+
+```{r modello_BP_cat1, echo=TRUE, message=FALSE, warning=FALSE}
+data <- within(data, {
+  BloodPressure.cat <- NA
+  BloodPressure.cat[BloodPressure < 60] <- "BP low"
+  BloodPressure.cat[BloodPressure >= 60 & BloodPressure <80] <- "BP normal"
+  BloodPressure.cat[BloodPressure >= 80] <- "BP high"
+})
+```
+```{r modello_BP_cat2, echo=FALSE, message=FALSE, warning=FALSE}
+mod_bpcat <-glm(Outcome ~ Pregnancies + Glucose + BMI + DiabetesPedigreeFunction + BloodPressure.cat + Age, binomial(link=logit), data)
+summary(mod_bpcat)
+
+data <- data[,-8] # eliminazione della nuova colonna contenente le categorie di pressione sanguigna
+```
+Il p-value delle variabili categoriche appena inserite è piuttosto alto: la variabile della pressione sanguigna continua a dimostrarsi poco significativa per l'analisi e non sembra apportare informazioni utili ai modelli.
+
+Si effettua un altro tentativo di categorizzare una variabile per tentare di migliorarne il p-value: l'età.
+
+### Variante con l'età per categorie
+
+```{r modello_age_cat, echo=FALSE, message=FALSE, warning=FALSE}
+hist(data$Age, main = "", xlab = "Età", ylab = "Pazienti", col = "#0088ff", fill ="black", border = "black")
+
+data <- within(data, {
+  Age.cat <- NA
+  Age.cat[Age < 26] <- "Very Young"
+  Age.cat[Age >= 26 & Age <36] <- "Young"
+  Age.cat[Age >= 36 & Age <51] <- "Adult"
+  Age.cat[Age >=51] <- "Senior"
+})
+
+mod_agecat <-glm(Outcome ~ Pregnancies + Glucose + BMI + DiabetesPedigreeFunction + Age.cat, binomial(link=logit), data)
+summary(mod_agecat)
+data <- data[,-8] # eliminazione della nuova colonna contenente le categorie di età
+```
+Anche con questa variante, similmente a quanto era successo con la pressione sanguigna, non si ottengono dei valori di p-value significativi per le nuove variabili categoriali introdotte.
+
+## Modello con esclusione di pressione sanguigna ed età delle pazienti
+Il primo modello implementato, che prendeva in considerazione tutte le variabili, suggeriva nel summary di eliminare **sia** la **pressione sanguigna** che l'**età** delle pazienti. Si prosegue in questa direzione.
+
+```{r modello_noAGEnoPRESSURE, echo=FALSE, message=FALSE, warning=FALSE}
+mod_nobpnoage <-glm(Outcome ~. -BloodPressure -Age, binomial(link=logit), data)
+summary(mod_nobpnoage)
+```
+Si nota un miglioramento del p-values di 'Pregnancies'. Valore di fitting con il modello saturo:
+```{r modello_noAGEnoPRESSURE2, echo=FALSE, message=FALSE, warning=FALSE}
+pchisq(mod_nobpnoage$deviance, mod_nobpnoage$df.residual, lower.tail = F)
+```
+Infine sono mostrati matrice di confusione e curva ROC:
+```{r modello_noAGEnoPRESSURE3, echo=FALSE, message=FALSE, warning=FALSE}
+# confusion matrix
+previsioni <- predict(mod_nobpnoage, type = "response")
+classi_predette <- ifelse(previsioni > 0.5, 1, 0)
+matrice_confusione <- confusionMatrix(as.factor(classi_predette), data$Outcome)
+print(matrice_confusione)
+
+# curva ROC
+roc(Outcome,previsioni)
+rocplot<-roc(Outcome~previsioni, col = "#0088ff", plot=TRUE, print.auc=T, legacy.axes = T,
+             main = "ROC curve")
+```
+
+Non si notano particolari miglioramenti rispetto al modello che prendeva in considerazione tutte le variabili.
+
+## Confronto tra i modelli esplorati
+
+Per visualizzare una 'classifica' di quali siano stati, tra i modelli esaminati fino ad ora, i migliori a descrivere il comportamento di questo dataset, si ricorre all'**AIC**. La sigla sta per "Criterio di Informazione di Akaike". È una misura utilizzata in statistica per valutare la qualità relativa di modelli statistici per un determinato insieme di dati. L'AIC quantifica il bilancio tra la bontà di adattamento del modello e la complessità del modello, penalizzando i modelli troppo complessi. Valori più **bassi** di AIC indicano un **migliore** compromesso tra adattamento del modello e complessità.
+
+I soli modelli ad essere confrontati saranno quelli per i quali le variabili hanno ottenuto un **p-value accettabile** (utilizzando il modello full come riferimento).
+
+```{r comparison, echo=TRUE, message=FALSE, warning=FALSE}
+AIC(mod_full, mod_nobp, mod_nobpnoage)
+```
+Il modello con AIC minore, in questo caso, è anche quello che coincide con i riusultati più accurati in termini di curva ROC e matrice di confusione: quello che esclude l'informazione relativa alla pressione sanguigna. In ogni caso, tra i tre modelli, la differenza in termini di accuratezza è minima.
+
+Un ultimo modello che resta da esaminare prima di proseguire all'analisi dei residui e previsioni, è il modello **backwards selection**. È un approccio utilizzato per identificare le variabili indipendenti più rilevanti in un modello statistico in forma automatica. Inizia con un modello che include tutte le variabili indipendenti potenzialmente rilevanti, e procede con una serie di passaggi di eliminazione per arrivare a un modello più snello e interpretabile.
+
+```{r backwards, echo=FALSE, message=FALSE, warning=FALSE}
+stepAIC(mod_full, direction="backward", data=data)
+```
+Utilizzando la selezione automatica, viene suggerita l'eliminazione della variabile della pressione sanguigna, cosa che **conferma** la scelta effettuata manualmente.
+
+Tirando le somme, si osservi come varia la probabilità di sviluppare il diabete al variare degli attributi del modello finale:
+```{r final, echo=FALSE, message=FALSE, warning=FALSE}
+exp(cbind(coef(mod_nobp), confint.default(mod_nobp, level=0.99))) 
+```
+Sulla base dei risultati ottenuti, si traggono le seguenti conclusioni:
+
+* Intercetta: non ha un'interpretazione diretta in termini di probabilità di base del diabete.
+* Numero di gravidanze: la propensione di sviluppare il diabete, per le donne che hanno affrontato _n_ gravidanze, è superiore del 10% circa rispetto alle donne che ne hanno affrontato _n-1_. Leggermente inferiore rispetto al valore del modello full.
+* Tasso di glicemia: per valutare questa variabile, si considera un aumento non unitario, bensì di 15 mg/dL.
+
+```{r glucose, echo=TRUE, message=FALSE, warning=FALSE}
+exp(cbind(coef(mod_nobp), confint.default(mod_nobp, level=0.99))[3]*15) 
+```
+
+* Quest'aumento incide positivamente sulla probabilità di essere affetti da diabete per il 71%;
+* BMI: mostra un effetto significativo, superiore al glucosio, in particolare l'aumento di una unità del 'body mass index' (nel sistema metrico, si tratterebbe di circa 17.938 kg/m) corrisponde a una probabilità superiore del 9% di essere malati;
+* Predisposizione genetica al diabete: è la variabile che impatta maggiormente, con la probabilità di essere malati che arriva quasi al quadruplo per un aumento di un solo punto nel sistema di punteggio associato alla genetica;
+* Età: il coefficiente è prossimo a uno. La differenza di età ha un effetto irrisorio sulla variabile risposta.
+
+___
+
+# Residui e previsione
+I "**residui di Pearson**" sono una misura della discrepanza tra i valori osservati e quelli predetti da un modello statistico, espressi in termini di deviazioni standard. Sono utilizzati principalmente nei modelli di regressione per valutare la **bontà di adattamento** del modello.
+
+Sono calcolati come la differenza tra il valore osservato e il valore predetto dal modello, diviso per la radice della varianza dei valori predetti. I residui di Pearson sono utilizzati per diagnosticare la presenza di punti dati influenti o outlier, nonché per valutare se la varianza dei valori predetti varia con il livello della variabile indipendente. Se i residui di Pearson mostrano una **struttura** o **un pattern evidente**, questo può indicare violazioni delle assunzioni del modello, come l'omoschedasticità, che può richiedere correzioni o modelli più appropriati.
+
+```{r residuals_pearson, echo=FALSE, message=FALSE, warning=FALSE}
+residualPlots(mod_nobp)
+```
+I residui rientrano perfettamente nel range [-3;3] e la loro distribuzione non sembra seguire nessun pattern particolare.
+
+___
+
+# Bilanciamento del dataset
+
+Nella fase di osservazione del dataset e preprocessamento dei dati, è emerso come il dataset utilizzato per quest'analisi fosse leggermente sbilanciato (molte più pazienti **sane** che **affette da diabete**).
+
+In questi casi, gli algoritmi di apprendimento automatico basati su classificatori binari (come la regressione logistica) tendono ad essere **sbilanciati** a loro volta verso la classe maggioritaria. In un dataset sbilanciato, l'algoritmo potrebbe imparare a classificare correttamente la maggior parte dei casi della classe maggioritaria, **ignorando le specificità della classe minoritaria** e ottenendo una bassa accuratezza per quest'ultima.
+
+Il bilanciamento del dataset può aiutare a compensare l'asimmetria e dare all'algoritmo un'esposizione più equilibrata a entrambe le classi. Questo può portare a un miglioramento dell'accuratezza complessiva del modello, in particolare per la classe minoritaria.
+
+A seguito, vengono utilizzati tre diversi approcci:
+
+* **Riduzione** della porzione di pazienti sane;
+* **Incremento** della porzione di pazienti diabetiche;
+* **Entrambe** le precedenti contemporaneamente.
+
+### Sottocampionamento: riduzione del dataset
+
+A seguito del bilanciamento, il dataset è così ripartito tra le due classi:
+```{r reduction, echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(123)
+
+data0 <- data %>% filter(Outcome==0) # si tengono da parte solo i NON diabetici, dei quali si ridurrà il volume
+indici_da_rimuovere <- sample(1:468, 100) 
+data0 <- data0[-indici_da_rimuovere, ] # in data rimangono solo 300 osservazioni di pazienti NON affetti dal diabete
+data1 <- data %>% filter(Outcome==1) # dataset coi soli diabetici
+data_reduced <- rbind(data0, data1)
+table(data_reduced$Outcome)
+data_reduced$Outcome <- as.factor(data_reduced$Outcome)
+```
+A seguire, si mostrano le correlazioni tra gli attributi e la variabile Outcome:
+```{r reduction1, echo=FALSE, message=FALSE, warning=FALSE}
+# correlazioni
+encode_labels <- function(column) {
+  unique_labels <- unique(column)
+  labels_to_numbers <- as.numeric(factor(column, levels = unique_labels))
+  return(labels_to_numbers)
+}
+
+# correlazioni con Outcome
+data_temp2 <- data_reduced %>% mutate_if(is.logical, encode_labels)
+data_temp2 <- data_temp2 %>% mutate_if(is.factor, encode_labels)
+coroutcome2 <- cor(data_temp2$Outcome, data_temp2)
+print(coroutcome2[,1:7])
+```
+Viene eseguito il modello di backwards selection per ricercare il miglior fit:
+```{r reduction2, echo=FALSE, message=FALSE, warning=FALSE}
+options(contrasts = c("contr.treatment", "contr.poly"))
+attach(data_reduced)
+
+# modello full
+mod_full_reduced <-glm(Outcome ~ ., binomial(link=logit), data_reduced)
+# backwards selection
+stepAIC(mod_full_reduced, direction="backward", data=data_reduced)
+```
+Il modello suggerisce, similmente a quanto accaduto per il dataset originale, di rimuovere il dato della pressione sanguigna. Di quest'ultima combinazione di variabili, si mostrano la matrice di confusione e la curva ROC:
+```{r reduction3, echo=TRUE, message=FALSE, warning=FALSE}
+mod_nobp_reduced <-glm(Outcome ~. -BloodPressure, binomial(link=logit), data_reduced)
+# confusion matrix
+previsioni <- predict(mod_nobp_reduced, type = "response")
+classi_predette <- ifelse(previsioni > 0.5, 1, 0)
+matrice_confusione <- confusionMatrix(as.factor(classi_predette), data_reduced$Outcome)
+print(matrice_confusione)
+
+# curva ROC
+
+roc(Outcome,previsioni)
+rocplot<-roc(Outcome~previsioni, col = "red", plot=TRUE, print.auc=T, legacy.axes = T,
+             main = "ROC curve")
+```
+
+Nonostante il tentativo di migliorare il bilanciamento del dataset attraverso questo sottocampionamento, l'accuratezza e la sensitività del modello non superano quelle dell'anteriore allenato sul dataset originale. Qualche punto percentuale, invece, è acquistato dalla specificità del modello con il bilanciamento del dataset.
+
+Si effettua un secondo tentativo con un sovracampionamento.
+
+### Sovracampionamento: aumento del dataset
+
+```{r increase, echo=TRUE, message=FALSE, warning=FALSE}
+data0 <- data %>% filter(Outcome==0) # si tengono da parte solo i NON diabetici, sui quali si ridurrà il sample
+data1 <- data %>% filter(Outcome==1) # dataset coi soli diabetici
+
+dup <- sample(1:238, 50, replace = TRUE)
+data_increased <- rbind(data0, data1, data1[dup, ])
+table(data_increased$Outcome)
+
+data_increased$Outcome <- as.factor(data_increased$Outcome)
+```
+A seguire, si mostrano le correlazioni tra gli attributi e la variabile Outcome:
+```{r increase1, echo=FALSE, message=FALSE, warning=FALSE}
+# correlazioni
+encode_labels <- function(column) {
+  unique_labels <- unique(column)
+  labels_to_numbers <- as.numeric(factor(column, levels = unique_labels))
+  return(labels_to_numbers)
+}
+
+# correlazioni con Outcome
+data_temp3 <- data_increased %>% mutate_if(is.logical, encode_labels)
+data_temp3 <- data_temp3 %>% mutate_if(is.factor, encode_labels)
+coroutcome3 <- cor(data_temp3$Outcome, data_temp3)
+print(coroutcome3[,1:7])
+```
+Viene eseguito il modello di backwards selection per ricercare il miglior fit:
+```{r increase2, echo=FALSE, message=FALSE, warning=FALSE}
+options(contrasts = c("contr.treatment", "contr.poly"))
+attach(data_increased)
+# modello full
+mod_full_increased <-glm(Outcome ~ ., binomial(link=logit), data_increased)
+# backwards selection
+stepAIC(mod_full_increased, direction="backward", data=data_increased)
+```
+I risultati del modello non si discostano dal caso precedente di aumento del volume del dataset. Matrice di confusione e curva ROC:
+```{r increase3, echo=FALSE, message=FALSE, warning=FALSE}
+mod_nobp_increased <-glm(Outcome ~. -BloodPressure, binomial(link=logit), data_increased)
+# confusion matrix
+previsioni <- predict(mod_nobp_increased, type = "response")
+classi_predette <- ifelse(previsioni > 0.5, 1, 0)
+matrice_confusione <- confusionMatrix(as.factor(classi_predette), data_increased$Outcome)
+print(matrice_confusione)
+
+# curva ROC
+
+roc(Outcome,previsioni)
+rocplot<-roc(Outcome~previsioni, col = "red", plot=TRUE, print.auc=T, legacy.axes = T,
+             main = "ROC curve")
+```
+
+Anche in questo secondo caso, non si sono ottenuti i risultati sperati, di fatto raggiungendo valori peggiori rispetto a tutti i casi anteriori. Un'ultima prova viene effettuata combinando sovracampionamento e sottocampionamento, seguendo un approccio ibrido.
+
+### Approccio ibrido
+In questo caso, la distribuzione finale delle osservazioni tra le due classi è la seguente:
+```{r ibrido, echo=TRUE, message=FALSE, warning=FALSE}
+data0 <- data %>% filter(Outcome==0) # si tengono da parte solo i NON diabetici, sui quali si ridurrà il sample
+data1 <- data %>% filter(Outcome==1) # dataset coi soli diabetici
+
+dup <- sample(1:238, 30, replace = TRUE)
+indici_da_rimuovere <- sample(1:468, 30) 
+data0 <- data0[-indici_da_rimuovere, ] # in data rimangono solo 300 osservazioni di pazienti NON affetti dal diabete
+
+dataH <- rbind(data0, data1, data1[dup, ])
+table(dataH$Outcome)
+dataH$Outcome <- as.factor(dataH$Outcome)
+```
+Si mostrano le correlazioni tra gli attributi e la variabile Outcome:
+```{r ibrido1, echo=FALSE, message=FALSE, warning=FALSE}
+# correlazioni
+encode_labels <- function(column) {
+  unique_labels <- unique(column)
+  labels_to_numbers <- as.numeric(factor(column, levels = unique_labels))
+  return(labels_to_numbers)
+}
+
+# correlazioni con Outcome
+data_temp3 <- dataH %>% mutate_if(is.logical, encode_labels)
+data_temp3 <- data_temp3 %>% mutate_if(is.factor, encode_labels)
+coroutcome3 <- cor(data_temp3$Outcome, data_temp3)
+print(coroutcome3[,1:7])
+```
+Viene eseguito il modello di backwards selection per ricercare il miglior fit:
+```{r ibrido2, echo=FALSE, message=FALSE, warning=FALSE}
+options(contrasts = c("contr.treatment", "contr.poly"))
+attach(dataH)
+
+# modello full
+mod_full_H <-glm(Outcome ~ ., binomial(link=logit), dataH)
+# backwards selection
+stepAIC(mod_full_H, direction="backward", data=dataH)
+```
+I risultati del modello non spiccano rispetto ai precedenti. Matrice di confusione e curva ROC:
+```{r ibrido3, echo=FALSE, message=FALSE, warning=FALSE}
+mod_nobp_H <-glm(Outcome ~. -BloodPressure, binomial(link=logit), dataH)
+# confusion matrix
+previsioni <- predict(mod_nobp_H, type = "response")
+classi_predette <- ifelse(previsioni > 0.5, 1, 0)
+matrice_confusione <- confusionMatrix(as.factor(classi_predette), dataH$Outcome)
+print(matrice_confusione)
+
+# curva ROC
+
+roc(Outcome,previsioni)
+rocplot<-roc(Outcome~previsioni, col = "red", plot=TRUE, print.auc=T, legacy.axes = T,
+             main = "ROC curve")
+```
+
+### Conclusioni sul bilanciamento del dataset
+
+Tra i tre modelli proposti sui tre dataset ottenuti a seguito di prove di integrazione e/o riduzione del volume dei dati, il **più accurato** è senza dubbio il **primo**, con un **ridotto** numero di pazenti non diabetici rispetto al dataset originale.
+
+Tuttavia, confrontando i valori di accuratezza e curve ROC, nonostante il bilanciamento della distribuzione dei dati nelle due classi, nemmeno il migliore tra i tre raggiunge i risultati ottenuti dal modello che considera tutti gli attributi (meno la pressione sanguigna) implementato sul **dataset originale**.
+
+___
+
+# Conclusioni e sviluppi futuri 
+
+Lo studio condotto ha permesso di identificare un modello che descrive discretamente il comportamento dei dati relativi a un dataset di pazienti affetti da diabete. Il modello fornisce informazioni utili per la comprensione delle relazioni tra le variabili in gioco e la prognosi della malattia.
+
+Tuttavia, lo studio presenta alcune **limitazioni**. L'analisi non ha tenuto conto di informazioni che potrebbero avere un impatto significativo sul comportamento del diabete, ma che non sono state raccolte e documentate all'atto della costruzione del dataset, come la **distinzione tra diabete di tipo 1 e di tipo 2**, l'età di **insorgenza** della malattia o dati sul **medicamento** della stessa.
+
+L'inclusione di queste informazioni in futuri studi potrebbe permettere di ottenere **modelli più raffinati e precisi**, in grado di fornire una migliore comprensione del diabete e di supportare decisioni terapeutiche più personalizzate (ad esempio, conoscere se si tratti di diabete di tipo 1 o di tipo 2 determinerebbe quasi certamente una **correlazione maggiore** con i livelli di insulina: il diabete di tipo 1, infatti, ha causa autoimmune poiché il corpo non produce più insulina autonomamente, mentre quello di tipo 2 non si genera per carenza di insulina, bensì per una mancata capacità di assorbimento della stessa da parte dell'organismo).
+
+Inoltre, sarebbe opportuno **ampliare** il campione di pazienti analizzati per aumentare la robustezza dei risultati e la loro generalizzabilità a una popolazione più ampia. In particolare, il dataset ideale avrebbe dovuto essere più **bilanciato tra le due classi**.
+
+In definitiva, questo studio rappresenta un primo tentativo nella comprensione del comportamento del diabete attraverso l'analisi dei dati. Ulteriori ricerche, condotte su campioni più ampi e con la considerazione di un maggior numero di variabili, potrebbero portare a risultati ancora più significativi e utili per la gestione di questa complessa patologia.
