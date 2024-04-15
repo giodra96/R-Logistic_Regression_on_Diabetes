@@ -8,4 +8,4 @@ The analysis is composed as following:
 4. Logistic regression
 5. Class balancing
 
-Take a look at the .Rmd file (or view the .html version in your browser) for the complete analysis with comments.
+Take a look at the .Rmd file for the complete analysis with comments.
